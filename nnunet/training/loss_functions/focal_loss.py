@@ -16,7 +16,7 @@ import numpy as np
 import torch
 from torch import nn
 from nnunet.utilities.nd_softmax import softmax_helper
-from nnunet.training.network_training.nnUNetTrainerV2 import nnUNetTrainerV2
+#from nnunet.training.network_training.nnUNetTrainerV2 import nnUNetTrainerV2
 
 
 # taken from https://github.com/JunMa11/SegLoss/blob/master/test/nnUNetV2/loss_functions/focal_loss.py
@@ -51,6 +51,7 @@ class FocalLoss(nn.Module):
     def forward(self, logit, target):
         if self.apply_nonlin is not None:
             logit = self.apply_nonlin(logit)
+        logit = torch.softmax(logit,dim= 1)    
         num_class = logit.shape[1]
 
         if logit.dim() > 2:
@@ -58,6 +59,7 @@ class FocalLoss(nn.Module):
             logit = logit.view(logit.size(0), logit.size(1), -1)
             logit = logit.permute(0, 2, 1).contiguous()
             logit = logit.view(-1, logit.size(-1))
+        #logit = torch.clamp(logit, min=1e-7, max=1.0)  #lyy
         target = torch.squeeze(target, 1)
         target = target.view(-1, 1)
         # print(logit.shape, target.shape)
@@ -92,6 +94,7 @@ class FocalLoss(nn.Module):
             one_hot_key = torch.clamp(
                 one_hot_key, self.smooth / (num_class - 1), 1.0 - self.smooth)
         pt = (one_hot_key * logit).sum(1) + self.smooth
+        #pt = torch.clamp(pt, min=1e-7, max=1.0)   #lyy
         logpt = pt.log()
 
         gamma = self.gamma

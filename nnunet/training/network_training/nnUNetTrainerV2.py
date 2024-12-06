@@ -71,7 +71,12 @@ class nnUNetTrainerV2(nnUNetTrainer):
             self.process_plans(self.plans)
 
             self.setup_DA_params()
-
+            
+            ############## lyy
+            #self.base_num_features = 16
+            #self.net_conv_kernel_sizes = [[3, 3, 3], [3, 3, 3], [3, 3, 3], [3, 3, 3], [3, 3, 3], [3, 3, 3], [3, 3, 3]]
+            #self.net_num_pool_op_kernel_sizes = [[2, 2, 2], [2, 2, 2], [2, 2, 2], [2, 2, 2], [1, 1, 1], [1, 2, 2]]
+            
             ################# Here we wrap the loss for deep supervision ############
             # we need to know the number of outputs of the network
             net_numpool = len(self.net_num_pool_op_kernel_sizes)
@@ -121,7 +126,7 @@ class nnUNetTrainerV2(nnUNetTrainer):
             self.initialize_network()
             self.initialize_optimizer_and_scheduler()
 
-            assert isinstance(self.network, (SegmentationNetwork, nn.DataParallel))
+            #assert isinstance(self.network, (SegmentationNetwork, nn.DataParallel))
         else:
             self.print_to_log_file('self.was_initialized is True, not running self.initialize again')
         self.was_initialized = True
@@ -141,22 +146,47 @@ class nnUNetTrainerV2(nnUNetTrainer):
             conv_op = nn.Conv3d
             dropout_op = nn.Dropout3d
             norm_op = nn.InstanceNorm3d
-
+ 
         else:
             conv_op = nn.Conv2d
             dropout_op = nn.Dropout2d
             norm_op = nn.InstanceNorm2d
+        
+        #self.conv_per_stage = 3
+        
+        self.stage_num = 5
+        self.base_num_features = 16
+        self.max_num_features = 256
+        
+
+        
+
+        if len(self.net_conv_kernel_sizes) > self.stage_num:
+            self.net_conv_kernel_sizes = self.net_conv_kernel_sizes[:self.stage_num]
+            self.net_num_pool_op_kernel_sizes = self.net_num_pool_op_kernel_sizes[:self.stage_num - 1]
+
+        
 
         norm_op_kwargs = {'eps': 1e-5, 'affine': True}
         dropout_op_kwargs = {'p': 0, 'inplace': True}
         net_nonlin = nn.LeakyReLU
         net_nonlin_kwargs = {'negative_slope': 1e-2, 'inplace': True}
-        self.network = Generic_UNet(self.num_input_channels, self.base_num_features, self.num_classes,
+
+        
+        self.network = Generic_UNet(1, self.base_num_features, self.num_classes,
                                     len(self.net_num_pool_op_kernel_sizes),
                                     self.conv_per_stage, 2, conv_op, norm_op, norm_op_kwargs, dropout_op,
                                     dropout_op_kwargs,
-                                    net_nonlin, net_nonlin_kwargs, True, False, lambda x: x, InitWeights_He(1e-2),
-                                    self.net_num_pool_op_kernel_sizes, self.net_conv_kernel_sizes, False, True, True)
+                                    net_nonlin, net_nonlin_kwargs, False, False, lambda x: x, InitWeights_He(1e-2),
+                                    self.net_num_pool_op_kernel_sizes, self.net_conv_kernel_sizes, False, True, True, self.max_num_features)
+        
+         
+        
+        print(self.network)
+        def count_parameters(model):
+            return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+        print(count_parameters(self.network))
         if torch.cuda.is_available():
             self.network.cuda()
         self.network.inference_apply_nonlin = softmax_helper
@@ -232,21 +262,89 @@ class nnUNetTrainerV2(nnUNetTrainer):
         data_dict = next(data_generator)
         data = data_dict['data']
         target = data_dict['target']
-
+ 
+        number = []
+        matrix_weight = []
+        for i in data_dict['keys']:
+            # 将字符串转换为整数
+            number.append(i)
+        print(number)
+        #[1,1.57402705,5.84469124,5.51327007,7.70764601,7.70393582,7.82239399,9.86036445,9.79212208,9.07417292,9.52126771,4.80561119,8.00863778,5.77692344]
+        weight = torch.ones(size=(len(target), self.batch_size, self.num_classes)) * 1 / 14  #lyy 14  tumour 2
+        weight_1 = torch.ones(size=(len(target), self.batch_size, self.num_classes)) * 1 / 14  #lyy 14  tumour 2
+        weight_d = [1., 0.9743, 0.9743, 0.9743, 0.8528, 0.9559, 0.9559, 0.8280, 0.8286, 0.8340, 0.8122, 0.9237, 0.8204, 0.9291] 
+        #* np.array([1, 1.83380888, 12.33115005, 10.94324685, 25.16274108, 25.12324126, 26.42838704, 87.5953611, 82.48844657, 49.49789066, 66.5423167, 8.46811204, 28.6819111, 12.03332958])
+        weight_d = np.array(weight_d) 
+        weight_d = weight_d / weight_d.sum()
+        weight_d = torch.tensor(weight_d)
+        weight_f = [1, 1.83380888, 12.33115005, 10.94324685, 25.16274108, 25.12324126, 26.42838704, 87.5953611, 82.48844657, 49.49789066, 66.5423167, 8.46811204, 28.6819111, 12.03332958]
+        weight_f = np.array(weight_f)
+        weight_f = weight_f / weight_f.sum()
+        weight_f = torch.tensor(weight_f)
+        
+        weight_k = np.array([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
+        weight_k = weight_k / weight_k.sum()
+        weight_k = torch.tensor(weight_k)
+        
+        weight_s = np.array([1, 1.1, 1.2, 1.2, 1.3, 1.4, 1.4, 2, 2, 1.6, 1.8, 1.2, 1.3, 1.2])
+        weight_s = weight_s / weight_s.sum()
+        weight_s = torch.tensor(weight_s)
+        for l in range(len(target)):
+            for b in range(target[l].shape[0]):
+                if do_backprop:
+                    '''
+                    ########tumour
+                    num_pos_samples = torch.sum(target[l][b] == 1)
+                    num_neg_samples = torch.sum(target[l][b] == 0)
+                    pos_weight = (num_neg_samples + 1e-3) / (num_pos_samples + 1e-3)
+                    '''
+                    if (number[b].startswith("FLARE")):
+                        weight[l, b] = weight_k
+                        #weight_1[l, b] = weight_s
+                        weight_1[l, b] = weight_k
+                        
+                    else:
+                        #weight[l, b] = weight_d
+                        weight[l, b] = weight_k
+                        weight_1[l, b] = weight_k
+                        #weight_1[l, b] = weight_s
+                    #weight[l, b] =  weight_k   
+                        #p = torch.tensor([1, pos_weight])
+                        #p = p / p.sum()
+                        #weight[l, b] = p
+                else:
+                    if (number[b].startswith("FLARE")):
+                        weight[l, b] = weight_k
+                        weight_1[l, b] = weight_k
+                    #elif (number[b].startswith("lyy")):
+                    #    weight[l, b] = weight_k
+                    else:
+                        weight[l, b] = weight_k
+                        weight_1[l, b] = weight_k
+                            
+                #else:
+                #    target[l][b][1] = target[l][b][0]
+        # for l in range(len(target)):
+        #     for b in range(target[l].shape[0]):
+        #         target[l][b][1] = target[l][b][0]
+        
         data = maybe_to_torch(data)
         target = maybe_to_torch(target)
-
+        weight = maybe_to_torch(weight)
+        weight_1 = maybe_to_torch(weight_1)
         if torch.cuda.is_available():
             data = to_cuda(data)
             target = to_cuda(target)
-
+            weight = to_cuda(weight)
+            weight_1 = to_cuda(weight_1)
         self.optimizer.zero_grad()
 
         if self.fp16:
             with autocast():
                 output = self.network(data)
                 del data
-                l = self.loss(output, target)
+                #l = self.loss(output, target)
+                l = self.loss(output, target, [weight,weight_1, self.epoch, 1])
 
             if do_backprop:
                 self.amp_grad_scaler.scale(l).backward()
@@ -270,7 +368,6 @@ class nnUNetTrainerV2(nnUNetTrainer):
         del target
 
         return l.detach().cpu().numpy()
-
     def do_split(self):
         """
         The default split is a 5 fold CV on all available training cases. nnU-Net will create a split (it is seeded,
@@ -402,6 +499,16 @@ class nnUNetTrainerV2(nnUNetTrainer):
             ep = self.epoch + 1
         else:
             ep = epoch
+        
+        #if ep == 140:
+        #    self.initial_lr = 2e-4
+        #if ep == 280:
+        #    self.initial_lr = 1e-3
+        #if ep == 360:
+        #    self.initial_lr = 5e-4
+        #if ep == 450:
+        #    self.initial_lr = 1e-4
+        
         self.optimizer.param_groups[0]['lr'] = poly_lr(ep, self.max_num_epochs, self.initial_lr, 0.9)
         self.print_to_log_file("lr:", np.round(self.optimizer.param_groups[0]['lr'], decimals=6))
 
